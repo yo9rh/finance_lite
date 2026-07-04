@@ -98,13 +98,45 @@ frappe.ui.form.on('Lite Transaction', {
         frm.refresh_field('allocations');
     },
 
-    get_invoices: function(frm) {
-        if (!frm.doc.party_type) {
-            frappe.msgprint(__('Please select Party Type first'));
-            return;
+    enable_discount: function(frm) {
+        if (!frm.doc.enable_discount) {
+            frm.set_value('amount_before_discount', 0);
+            frm.set_value('discount_percentage', 0);
+            frm.set_value('discount_amount', 0);
+        } else {
+            if (!frm.doc.amount_before_discount) {
+                frm.set_value('amount_before_discount', frm.doc.paid_amount);
+            }
         }
-        if (!frm.doc.party) {
-            frappe.msgprint(__('Please select Party first'));
+    },
+
+    amount_before_discount: function(frm) {
+        if (frm.doc.enable_discount) {
+            let discount_amt = (frm.doc.amount_before_discount || 0) * (frm.doc.discount_percentage || 0) / 100;
+            frappe.model.set_value(frm.doctype, frm.docname, 'discount_amount', discount_amt);
+            frappe.model.set_value(frm.doctype, frm.docname, 'paid_amount', (frm.doc.amount_before_discount || 0) - discount_amt);
+        }
+    },
+
+    discount_percentage: function(frm) {
+        if (frm.doc.enable_discount) {
+            let discount_amt = (frm.doc.amount_before_discount || 0) * (frm.doc.discount_percentage || 0) / 100;
+            frappe.model.set_value(frm.doctype, frm.docname, 'discount_amount', discount_amt);
+            frappe.model.set_value(frm.doctype, frm.docname, 'paid_amount', (frm.doc.amount_before_discount || 0) - discount_amt);
+        }
+    },
+
+    discount_amount: function(frm) {
+        if (frm.doc.enable_discount && frm.doc.amount_before_discount) {
+            let pct = ((frm.doc.discount_amount || 0) / frm.doc.amount_before_discount) * 100;
+            frappe.model.set_value(frm.doctype, frm.docname, 'discount_percentage', pct);
+            frappe.model.set_value(frm.doctype, frm.docname, 'paid_amount', frm.doc.amount_before_discount - (frm.doc.discount_amount || 0));
+        }
+    },
+
+    get_invoices: function(frm) {
+        if (!frm.doc.party_type || !frm.doc.party) {
+            frappe.msgprint(__('Please select Party Type and Party first.'));
             return;
         }
 
@@ -121,7 +153,9 @@ frappe.ui.form.on('Lite Transaction', {
             callback: function(r) {
                 if (r.message && r.message.length > 0) {
                     frm.clear_table('allocations');
-                    let unallocated_amount = flt(frm.doc.paid_amount);
+                    
+                    // Base the unallocated amount on the amount before discount if discount is enabled
+                    let unallocated_amount = frm.doc.enable_discount ? flt(frm.doc.amount_before_discount) : flt(frm.doc.paid_amount);
                     let has_allocated = false;
 
                     r.message.forEach(function(row) {
@@ -139,6 +173,7 @@ frappe.ui.form.on('Lite Transaction', {
                         let child = frm.add_child('allocations');
                         child.reference_doctype = row.voucher_type;
                         child.reference_name = row.voucher_no;
+                        child.account = row.account;  // Important for precise reconciliation
                         child.total_amount = row.total_amount || row.invoice_amount;
                         child.outstanding_amount = row.outstanding_amount;
                         child.allocated_amount = allocate_now;
@@ -147,7 +182,7 @@ frappe.ui.form.on('Lite Transaction', {
 
                     let msg = __('Successfully fetched {0} outstanding invoice(s).', [r.message.length]);
                     if (has_allocated) {
-                        msg += '<br>' + __('The amount has been automatically allocated based on the paid amount.');
+                        msg += '<br>' + __('The amount has been automatically allocated based on the total amount.');
                     }
 
                     frappe.msgprint({

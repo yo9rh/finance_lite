@@ -95,6 +95,40 @@
    "bold": 1
   },
   {
+   "fieldname": "enable_discount",
+   "fieldtype": "Check",
+   "label": "Enable Discount",
+   "default": 0,
+   "depends_on": "eval:doc.has_party == 1"
+  },
+  {
+   "fieldname": "amount_before_discount",
+   "fieldtype": "Currency",
+   "label": "Amount Before Discount",
+   "depends_on": "eval:doc.enable_discount == 1",
+   "options": "currency"
+  },
+  {
+   "fieldname": "discount_percentage",
+   "fieldtype": "Percent",
+   "label": "Discount (%)",
+   "depends_on": "eval:doc.enable_discount == 1"
+  },
+  {
+   "fieldname": "discount_amount",
+   "fieldtype": "Currency",
+   "label": "Discount Amount",
+   "depends_on": "eval:doc.enable_discount == 1",
+   "options": "currency"
+  },
+  {
+   "fieldname": "discount_account",
+   "fieldtype": "Link",
+   "label": "Discount Account",
+   "options": "Account",
+   "depends_on": "eval:doc.enable_discount == 1"
+  },
+  {
    "fieldname": "sec_party",
    "fieldtype": "Section Break",
    "label": "Party Details"

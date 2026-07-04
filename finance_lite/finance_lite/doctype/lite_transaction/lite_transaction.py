@@ -95,31 +95,49 @@ class LiteTransaction(Document):
             })
 
         # 3. Add MOP Account Entry
+        # MOP account is debited if Receipt, credited if Payment. The amount is paid_amount.
         if self.transaction_type == "Receipt":
             gl_entries.append(get_gl_dict(mop_account, amount, 0, opposing_account))
         else:
             gl_entries.append(get_gl_dict(mop_account, 0, amount, opposing_account))
 
+        # 3.5 Handle Discount Entry
+        if self.enable_discount and flt(self.discount_amount) > 0:
+            if not self.discount_account:
+                frappe.throw(_("Discount Account is mandatory when discount is enabled."))
+            if self.transaction_type == "Receipt":
+                # Discount Allowed is an expense (Debit)
+                gl_entries.append(get_gl_dict(self.discount_account, flt(self.discount_amount), 0, opposing_account))
+            else:
+                # Discount Received is an income (Credit)
+                gl_entries.append(get_gl_dict(self.discount_account, 0, flt(self.discount_amount), opposing_account))
+
         # 4. Add Opposing Account Entry (Split by allocations if necessary)
+        # The opposing entry total must be amount_before_discount if discount is enabled, else paid_amount
+        total_party_amount = flt(self.amount_before_discount) if self.enable_discount else amount
+
         if self.has_party and self.allocations:
             allocated_total = 0
             for ref in self.allocations:
                 allocated_amt = flt(ref.allocated_amount)
                 if allocated_amt > 0:
                     allocated_total += allocated_amt
+                    # Use specific account from allocation if available, else fallback to default opposing
+                    row_account = ref.account or opposing_account
+                    
                     if self.transaction_type == "Receipt":
                         # Customer paying us -> credit customer
                         gl_entries.append(
-                            get_gl_dict(opposing_account, 0, allocated_amt, mop_account, ref.reference_doctype, ref.reference_name)
+                            get_gl_dict(row_account, 0, allocated_amt, mop_account, ref.reference_doctype, ref.reference_name)
                         )
                     else:
                         # We paying supplier -> debit supplier
                         gl_entries.append(
-                            get_gl_dict(opposing_account, allocated_amt, 0, mop_account, ref.reference_doctype, ref.reference_name)
+                            get_gl_dict(row_account, allocated_amt, 0, mop_account, ref.reference_doctype, ref.reference_name)
                         )
 
             # Unallocated remainder
-            unallocated = amount - allocated_total
+            unallocated = total_party_amount - allocated_total
             if unallocated > 0:
                 if self.transaction_type == "Receipt":
                     gl_entries.append(get_gl_dict(opposing_account, 0, unallocated, mop_account))
@@ -128,9 +146,9 @@ class LiteTransaction(Document):
         else:
             # Full amount unallocated or no party
             if self.transaction_type == "Receipt":
-                gl_entries.append(get_gl_dict(opposing_account, 0, amount, mop_account))
+                gl_entries.append(get_gl_dict(opposing_account, 0, total_party_amount, mop_account))
             else:
-                gl_entries.append(get_gl_dict(opposing_account, amount, 0, mop_account))
+                gl_entries.append(get_gl_dict(opposing_account, total_party_amount, 0, mop_account))
 
         make_gl_entries(gl_entries, cancel=cancel, adv_adj=True, merge_entries=False)
 
@@ -143,7 +161,6 @@ def get_outstanding_invoices(party_type, party, transaction_type, company=None):
     """
     Fetch outstanding documents for a given party by querying GL Entry directly.
     This captures ALL voucher types: Sales Invoice, Journal Entry, Purchase Invoice, etc.
-    Called from the Client Script via frappe.call.
     """
     if not party_type or not party:
         frappe.throw(_("Please specify Party Type and Party."))
@@ -153,53 +170,15 @@ def get_outstanding_invoices(party_type, party, transaction_type, company=None):
             "Global Defaults", "default_company"
         )
 
-    # First try ERPNext's built-in function
-    try:
-        from erpnext.accounts.party import get_party_account
-
-        party_account = get_party_account(party_type, party, company)
-
-        args = frappe._dict(
-            {
-                "party_type": party_type,
-                "party": party,
-                "company": company,
-                "party_account": party_account,
-                "account": party_account,
-                "voucher_type": "",
-                "voucher_no": "",
-                "cost_center": "",
-                "against_all_invoices": True,
-                "posting_date": frappe.utils.today(),
-            }
-        )
-
-        from erpnext.accounts.doctype.payment_entry.payment_entry import (
-            get_outstanding_reference_documents,
-        )
-
-        references = get_outstanding_reference_documents(args)
-        if references:
-            return references
-
-    except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Finance Lite: get_outstanding_reference_documents failed — using GL Entry fallback",
-        )
-
-    # Fallback: query GL Entry directly — captures Sales Invoices, Journal Entries, and everything else
+    # We skip ERPNext's built-in get_outstanding_reference_documents because it 
+    # doesn't reliably return the exact GL account for Journal Entries in all cases.
     return _get_outstanding_via_gl_entry(party_type, party, company)
 
 
 def _get_outstanding_via_gl_entry(party_type, party, company):
     """
-    Direct GL Entry query to find all outstanding amounts for a party,
-    regardless of voucher type (Sales Invoice, Journal Entry, etc.).
-
-    Logic:
-    - Customer → outstanding = SUM(debit - credit) > 0  (money owed TO us)
-    - Supplier/Employee → outstanding = SUM(credit - debit) > 0  (money we OWE)
+    Direct GL Entry query to find all outstanding amounts for a party.
+    Also fetches the exact 'account' from the GL Entry so reconciliation works perfectly.
     """
     if party_type == "Customer":
         # For customers: debit > credit means they still owe us money
@@ -213,6 +192,7 @@ def _get_outstanding_via_gl_entry(party_type, party, company):
         SELECT
             gle.voucher_type,
             gle.voucher_no,
+            gle.account,
             {outstanding_expr} AS outstanding_amount,
             {outstanding_expr} AS invoice_amount
         FROM `tabGL Entry` gle
@@ -223,7 +203,8 @@ def _get_outstanding_via_gl_entry(party_type, party, company):
             AND gle.is_cancelled = 0
         GROUP BY
             gle.voucher_type,
-            gle.voucher_no
+            gle.voucher_no,
+            gle.account
         HAVING
             outstanding_amount > 0.005
         ORDER BY
