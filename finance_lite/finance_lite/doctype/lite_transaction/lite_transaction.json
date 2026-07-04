@@ -176,11 +176,11 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "linked_doc",
+   "fieldname": "custom_paper_sequence",
    "fieldtype": "Data",
-   "label": "Linked Document",
+   "label": "Paper Sequence",
    "no_copy": 1,
-   "read_only": 1,
+   "hidden": 1,
    "print_hide": 1
   },
   {
