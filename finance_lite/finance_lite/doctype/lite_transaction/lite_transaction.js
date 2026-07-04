@@ -118,19 +118,39 @@ frappe.ui.form.on('Lite Transaction', {
             callback: function(r) {
                 if (r.message && r.message.length > 0) {
                     frm.clear_table('allocations');
+                    let unallocated_amount = flt(frm.doc.paid_amount);
+                    let has_allocated = false;
+
                     r.message.forEach(function(row) {
+                        let allocate_now = 0;
+                        if (unallocated_amount > 0) {
+                            if (unallocated_amount >= row.outstanding_amount) {
+                                allocate_now = row.outstanding_amount;
+                            } else {
+                                allocate_now = unallocated_amount;
+                            }
+                            unallocated_amount -= allocate_now;
+                            has_allocated = true;
+                        }
+
                         let child = frm.add_child('allocations');
                         child.reference_doctype = row.voucher_type;
                         child.reference_name = row.voucher_no;
-                        child.total_amount = row.invoice_amount;
+                        child.total_amount = row.total_amount || row.invoice_amount;
                         child.outstanding_amount = row.outstanding_amount;
-                        child.allocated_amount = 0;
+                        child.allocated_amount = allocate_now;
                     });
                     frm.refresh_field('allocations');
+
+                    let msg = __('Successfully fetched {0} outstanding invoice(s).', [r.message.length]);
+                    if (has_allocated) {
+                        msg += '<br>' + __('The amount has been automatically allocated based on the paid amount.');
+                    }
+
                     frappe.msgprint({
                         title: __('Done'),
                         indicator: 'green',
-                        message: __('Successfully fetched {0} outstanding invoice(s). Please enter allocated amounts.', [r.message.length])
+                        message: msg
                     });
                 } else {
                     frappe.msgprint({
