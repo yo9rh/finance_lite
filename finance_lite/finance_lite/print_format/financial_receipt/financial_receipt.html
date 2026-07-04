@@ -1,0 +1,403 @@
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+
+    * { box-sizing: border-box; }
+
+    .receipt-wrapper {
+        font-family: 'Tajawal', Tahoma, Arial, sans-serif;
+        direction: rtl;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 10px;
+        color: #1a1a2e;
+    }
+
+    .receipt-box {
+        border: 2px solid #2E86AB;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+
+    /* Header */
+    .receipt-header {
+        background: linear-gradient(135deg, #2E86AB 0%, #1a5276 100%);
+        color: white;
+        padding: 24px 30px;
+        text-align: center;
+        position: relative;
+    }
+
+    .receipt-header .doc-type-badge {
+        display: inline-block;
+        background: rgba(255,255,255,0.2);
+        border: 1px solid rgba(255,255,255,0.4);
+        border-radius: 20px;
+        padding: 4px 20px;
+        font-size: 12px;
+        font-weight: 500;
+        margin-bottom: 8px;
+        letter-spacing: 1px;
+    }
+
+    .receipt-header h2 {
+        margin: 0 0 6px 0;
+        font-size: 26px;
+        font-weight: 800;
+    }
+
+    .receipt-header .meta-row {
+        display: flex;
+        justify-content: center;
+        gap: 30px;
+        margin-top: 10px;
+        font-size: 13px;
+        opacity: 0.9;
+    }
+
+    .receipt-header .meta-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .receipt-header .meta-label {
+        opacity: 0.8;
+    }
+
+    .receipt-header .meta-value {
+        font-weight: 700;
+        background: rgba(255,255,255,0.15);
+        padding: 2px 10px;
+        border-radius: 12px;
+    }
+
+    /* Amount Banner */
+    .amount-banner {
+        background: #f0f9ff;
+        border-bottom: 2px dashed #2E86AB;
+        padding: 18px 30px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .amount-banner .amount-label {
+        font-size: 14px;
+        color: #666;
+        font-weight: 500;
+    }
+
+    .amount-banner .amount-value {
+        font-size: 28px;
+        font-weight: 800;
+        color: #2E86AB;
+    }
+
+    .amount-banner .transaction-badge {
+        background: {% if doc.transaction_type == 'قبض' %}#27ae60{% else %}#e74c3c{% endif %};
+        color: white;
+        padding: 6px 18px;
+        border-radius: 20px;
+        font-weight: 700;
+        font-size: 14px;
+    }
+
+    /* Body */
+    .receipt-body {
+        padding: 24px 30px;
+    }
+
+    .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-bottom: 20px;
+    }
+
+    .info-item {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 12px 16px;
+        border-right: 3px solid #2E86AB;
+    }
+
+    .info-item .info-label {
+        font-size: 11px;
+        color: #999;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+
+    .info-item .info-value {
+        font-size: 14px;
+        font-weight: 700;
+        color: #1a1a2e;
+    }
+
+    .info-item.full-width {
+        grid-column: 1 / -1;
+    }
+
+    /* Remarks */
+    .remarks-box {
+        background: #fffbf0;
+        border: 1px solid #f0c040;
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 20px;
+    }
+
+    .remarks-box .remarks-label {
+        font-size: 11px;
+        color: #b8860b;
+        font-weight: 700;
+        margin-bottom: 4px;
+    }
+
+    .remarks-box .remarks-text {
+        font-size: 14px;
+        color: #555;
+    }
+
+    /* Allocations Table */
+    .allocations-section {
+        margin-bottom: 20px;
+    }
+
+    .section-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: #2E86AB;
+        margin-bottom: 10px;
+        padding-bottom: 6px;
+        border-bottom: 2px solid #e8f4f8;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .alloc-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+    }
+
+    .alloc-table thead tr {
+        background: #2E86AB;
+        color: white;
+    }
+
+    .alloc-table th {
+        padding: 10px 14px;
+        font-weight: 600;
+        text-align: center;
+    }
+
+    .alloc-table tbody tr {
+        border-bottom: 1px solid #eee;
+    }
+
+    .alloc-table tbody tr:nth-child(even) {
+        background: #f8f9fa;
+    }
+
+    .alloc-table tbody tr:last-child {
+        border-bottom: none;
+    }
+
+    .alloc-table td {
+        padding: 9px 14px;
+        text-align: center;
+    }
+
+    .alloc-table .amount-cell {
+        font-weight: 700;
+        color: #27ae60;
+    }
+
+    /* Signatures */
+    .signatures {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 40px;
+        padding-top: 20px;
+        border-top: 1px dashed #ccc;
+    }
+
+    .signature-block {
+        text-align: center;
+        width: 35%;
+    }
+
+    .signature-block .sig-title {
+        font-weight: 700;
+        font-size: 13px;
+        color: #555;
+        margin-bottom: 40px;
+    }
+
+    .signature-block .sig-line {
+        border-bottom: 1px solid #333;
+        margin: 0 10px;
+    }
+
+    /* Footer */
+    .receipt-footer {
+        background: #f8f9fa;
+        border-top: 1px solid #e0e0e0;
+        padding: 10px 30px;
+        text-align: center;
+        font-size: 11px;
+        color: #999;
+    }
+
+    .linked-doc-badge {
+        display: inline-block;
+        background: #e8f4f8;
+        border: 1px solid #2E86AB;
+        color: #2E86AB;
+        border-radius: 12px;
+        padding: 3px 12px;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    @media print {
+        .receipt-wrapper { padding: 0; }
+        .receipt-box { box-shadow: none; border: 2px solid #333; }
+    }
+</style>
+
+<div class="receipt-wrapper">
+    <div class="receipt-box">
+
+        <!-- Header -->
+        <div class="receipt-header">
+            <div class="doc-type-badge">FINANCE LITE</div>
+            <h2>{{ "سند قبض" if doc.transaction_type == "قبض" else "سند صرف" }}</h2>
+            <div class="meta-row">
+                <div class="meta-item">
+                    <span class="meta-label">رقم السند:</span>
+                    <span class="meta-value">{{ doc.name }}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">التاريخ:</span>
+                    <span class="meta-value">{{ doc.get_formatted('posting_date') }}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">طريقة الدفع:</span>
+                    <span class="meta-value">{{ doc.mode_of_payment }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Amount Banner -->
+        <div class="amount-banner">
+            <div>
+                <div class="amount-label">المبلغ الإجمالي</div>
+                <div class="amount-value">{{ doc.get_formatted('paid_amount') }}</div>
+            </div>
+            <div class="transaction-badge">{{ doc.transaction_type }}</div>
+        </div>
+
+        <!-- Body -->
+        <div class="receipt-body">
+
+            {% if doc.has_party %}
+            <!-- Party Info -->
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">نوع الطرف</div>
+                    <div class="info-value">{{ doc.party_type }}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-label">الطرف</div>
+                    <div class="info-value">{{ doc.party }}</div>
+                </div>
+            </div>
+
+            {% if doc.remarks %}
+            <div class="remarks-box">
+                <div class="remarks-label">البيان</div>
+                <div class="remarks-text">{{ doc.remarks }}</div>
+            </div>
+            {% endif %}
+
+            <!-- Allocations -->
+            {% set paid_rows = doc.allocations | selectattr('allocated_amount', 'gt', 0) | list %}
+            {% if paid_rows %}
+            <div class="allocations-section">
+                <div class="section-title">
+                    📋 تفاصيل الفواتير المسددة
+                </div>
+                <table class="alloc-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>نوع المستند</th>
+                            <th>رقم الفاتورة</th>
+                            <th>إجمالي الفاتورة</th>
+                            <th>المبلغ المخصص (المسدد)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for i, row in paid_rows | enumerate(start=1) %}
+                        <tr>
+                            <td>{{ i }}</td>
+                            <td>{{ row.reference_doctype }}</td>
+                            <td><strong>{{ row.reference_name }}</strong></td>
+                            <td>{{ row.get_formatted('total_amount') }}</td>
+                            <td class="amount-cell">{{ row.get_formatted('allocated_amount') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {% else %}
+            <!-- Direct Account Info -->
+            <div class="info-grid">
+                <div class="info-item full-width">
+                    <div class="info-label">الحساب</div>
+                    <div class="info-value">{{ doc.account }}</div>
+                </div>
+            </div>
+
+            {% if doc.remarks %}
+            <div class="remarks-box">
+                <div class="remarks-label">وذلك عن</div>
+                <div class="remarks-text">{{ doc.remarks }}</div>
+            </div>
+            {% endif %}
+            {% endif %}
+
+            {% if doc.linked_doc %}
+            <div style="margin-bottom: 16px; text-align: left;">
+                <span class="linked-doc-badge">📎 المستند المحاسبي: {{ doc.linked_doc }}</span>
+            </div>
+            {% endif %}
+
+            <!-- Signatures -->
+            <div class="signatures">
+                <div class="signature-block">
+                    <div class="sig-title">توقيع {{ "المستلم" if doc.transaction_type == "قبض" else "المُسلِّم" }}</div>
+                    <div class="sig-line"></div>
+                </div>
+                <div class="signature-block">
+                    <div class="sig-title">توقيع المحاسب / الصندوق</div>
+                    <div class="sig-line"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="receipt-footer">
+            تم إصدار هذا الإيصال بواسطة Finance Lite — ERPNext &nbsp;|&nbsp; {{ doc.owner }} &nbsp;|&nbsp; {{ frappe.utils.now_datetime().strftime('%Y-%m-%d %H:%M') }}
+        </div>
+
+    </div>
+</div>
