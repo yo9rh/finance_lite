@@ -13,6 +13,9 @@ class LiteTransaction(Document):
     # -----------------------------------------------------------------------
     def validate(self):
         self._validate_allocated_amounts()
+        if self.has_party:
+            if not self.party_type or not self.party:
+                frappe.throw(_("Party Type and Party are mandatory when 'Has Party' is checked."))
 
     def _validate_allocated_amounts(self):
         """Ensure total allocated amounts do not exceed the paid amount."""
@@ -27,166 +30,109 @@ class LiteTransaction(Document):
                 )
 
     # -----------------------------------------------------------------------
-    # Submit
+    # Submit / Cancel
     # -----------------------------------------------------------------------
     def on_submit(self):
-        if self.has_party:
-            self.create_payment_entry()
-        else:
-            self.create_journal_entry()
+        self.make_gl_entries()
 
-    # -----------------------------------------------------------------------
-    # Cancel
-    # -----------------------------------------------------------------------
     def on_cancel(self):
-        if self.linked_doc:
-            linked_doctype = "Payment Entry" if self.has_party else "Journal Entry"
-            try:
-                doc_to_cancel = frappe.get_doc(linked_doctype, self.linked_doc)
-                if doc_to_cancel.docstatus == 1:
-                    doc_to_cancel.cancel()
-                    frappe.msgprint(
-                        _("Linked accounting document ({0}) has been cancelled.").format(self.linked_doc)
-                    )
-                else:
-                    frappe.msgprint(
-                        _("Linked document ({0}) was already in Draft or Cancelled state.").format(self.linked_doc)
-                    )
-            except frappe.DoesNotExistError:
-                frappe.msgprint(
-                    _("Warning: Linked document ({0}) was not found in the system.").format(self.linked_doc),
-                    indicator="orange",
-                )
+        self.make_gl_entries(cancel=True)
 
     # -----------------------------------------------------------------------
-    # Create Payment Entry
+    # General Ledger Entries
     # -----------------------------------------------------------------------
-    def create_payment_entry(self):
-        """Create a Payment Entry with invoice allocations."""
-        # Receipt → Receive, Payment → Pay
-        payment_type = "Receive" if self.transaction_type == "Receipt" else "Pay"
-        company = self.company
+    def make_gl_entries(self, cancel=False):
+        """Create GL Entries and Payment Ledger Entries for this transaction."""
+        from erpnext.accounts.general_ledger import make_gl_entries
 
-        pe = frappe.new_doc("Payment Entry")
-        pe.payment_type = payment_type
-        pe.posting_date = self.posting_date
-        pe.mode_of_payment = self.mode_of_payment
-        pe.party_type = self.party_type
-        pe.party = self.party
-        pe.company = company
-        pe.paid_amount = flt(self.paid_amount)
-        pe.received_amount = flt(self.paid_amount)
-        pe.remarks = self.remarks or _("Auto-generated from Lite Transaction: {0}").format(self.name)
-        pe.reference_no = self.name
-        pe.reference_date = self.posting_date
+        gl_entries = []
 
-        # Add invoice references
-        for ref in self.allocations:
-            if flt(ref.allocated_amount) > 0:
-                pe.append(
-                    "references",
-                    {
-                        "reference_doctype": ref.reference_doctype,
-                        "reference_name": ref.reference_name,
-                        "total_amount": flt(ref.total_amount),
-                        "outstanding_amount": flt(ref.outstanding_amount),
-                        "allocated_amount": flt(ref.allocated_amount),
-                    },
-                )
-
-        try:
-            pe.setup_party_account_field()
-            pe.set_missing_values()
-            pe.set_exchange_rate()
-        except Exception:
-            pass
-
-        # Force exchange rates if not set
-        if not pe.source_exchange_rate:
-            pe.source_exchange_rate = 1.0
-        if not pe.target_exchange_rate:
-            pe.target_exchange_rate = 1.0
-
-        pe.insert(ignore_permissions=True)
-        pe.submit()
-
-        frappe.db.set_value(self.doctype, self.name, "linked_doc", pe.name)
-        frappe.msgprint(
-            _("Payment Entry created: {0}").format(
-                frappe.bold(frappe.utils.get_link_to_form("Payment Entry", pe.name))
-            ),
-            indicator="green",
-        )
-
-    # -----------------------------------------------------------------------
-    # Create Journal Entry
-    # -----------------------------------------------------------------------
-    def create_journal_entry(self):
-        """Create a double-entry Journal Entry for direct account transactions."""
-        company = self.company
-
-        # Get the default account for the chosen Mode of Payment
+        # 1. Get Mode of Payment Account
         mop_account = frappe.db.get_value(
             "Mode of Payment Account",
-            {"parent": self.mode_of_payment, "company": company},
+            {"parent": self.mode_of_payment, "company": self.company},
             "default_account",
         )
-
         if not mop_account:
             frappe.throw(
-                _("Mode of Payment '{0}' has no default account for company '{1}'. Please configure it in Mode of Payment settings.").format(
-                    self.mode_of_payment, company
+                _("Mode of Payment '{0}' has no default account for company '{1}'.").format(
+                    self.mode_of_payment, self.company
                 )
             )
 
-        je = frappe.new_doc("Journal Entry")
-        je.voucher_type = "Journal Entry"
-        je.posting_date = self.posting_date
-        je.company = company
-        je.user_remark = self.remarks or _("Auto-generated from Lite Transaction: {0}").format(self.name)
-        je.cheque_no = self.name
-        je.cheque_date = self.posting_date
-
-        # Receipt → Cash/Bank Dr, Income Cr
-        # Payment → Expense Dr, Cash/Bank Cr
-        if self.transaction_type == "Receipt":
-            debit_acc = mop_account
-            credit_acc = self.account
+        # 2. Determine Opposing Account
+        if self.has_party:
+            from erpnext.accounts.party import get_party_account
+            opposing_account = get_party_account(self.party_type, self.party, self.company)
+            if not opposing_account:
+                frappe.throw(_("Please set a default account for {0} {1}").format(self.party_type, self.party))
         else:
-            debit_acc = self.account
-            credit_acc = mop_account
+            opposing_account = self.account
+            if not opposing_account:
+                frappe.throw(_("Expense / Income Account is mandatory when there is no party."))
 
         amount = flt(self.paid_amount)
+        cost_center = frappe.get_cached_value("Company", self.company, "cost_center")
 
-        je.append(
-            "accounts",
-            {
-                "account": debit_acc,
-                "debit_in_account_currency": amount,
-                "credit_in_account_currency": 0,
-                "user_remark": self.remarks,
-            },
-        )
-        je.append(
-            "accounts",
-            {
-                "account": credit_acc,
-                "debit_in_account_currency": 0,
-                "credit_in_account_currency": amount,
-                "user_remark": self.remarks,
-            },
-        )
+        def get_gl_dict(account, debit, credit, against_acc, against_v_type=None, against_v=None):
+            return frappe._dict({
+                "company": self.company,
+                "posting_date": self.posting_date,
+                "voucher_type": self.doctype,
+                "voucher_no": self.name,
+                "account": account,
+                "against": against_acc,
+                "debit": debit,
+                "credit": credit,
+                "debit_in_account_currency": debit,
+                "credit_in_account_currency": credit,
+                "against_voucher_type": against_v_type,
+                "against_voucher": against_v,
+                "party_type": self.party_type if account == opposing_account and self.has_party else None,
+                "party": self.party if account == opposing_account and self.has_party else None,
+                "remarks": self.remarks or _("Finance Lite Transaction"),
+                "cost_center": cost_center
+            })
 
-        je.insert(ignore_permissions=True)
-        je.submit()
+        # 3. Add MOP Account Entry
+        if self.transaction_type == "Receipt":
+            gl_entries.append(get_gl_dict(mop_account, amount, 0, opposing_account))
+        else:
+            gl_entries.append(get_gl_dict(mop_account, 0, amount, opposing_account))
 
-        frappe.db.set_value(self.doctype, self.name, "linked_doc", je.name)
-        frappe.msgprint(
-            _("Journal Entry created: {0}").format(
-                frappe.bold(frappe.utils.get_link_to_form("Journal Entry", je.name))
-            ),
-            indicator="green",
-        )
+        # 4. Add Opposing Account Entry (Split by allocations if necessary)
+        if self.has_party and self.allocations:
+            allocated_total = 0
+            for ref in self.allocations:
+                allocated_amt = flt(ref.allocated_amount)
+                if allocated_amt > 0:
+                    allocated_total += allocated_amt
+                    if self.transaction_type == "Receipt":
+                        # Customer paying us -> credit customer
+                        gl_entries.append(
+                            get_gl_dict(opposing_account, 0, allocated_amt, mop_account, ref.reference_doctype, ref.reference_name)
+                        )
+                    else:
+                        # We paying supplier -> debit supplier
+                        gl_entries.append(
+                            get_gl_dict(opposing_account, allocated_amt, 0, mop_account, ref.reference_doctype, ref.reference_name)
+                        )
+
+            # Unallocated remainder
+            unallocated = amount - allocated_total
+            if unallocated > 0:
+                if self.transaction_type == "Receipt":
+                    gl_entries.append(get_gl_dict(opposing_account, 0, unallocated, mop_account))
+                else:
+                    gl_entries.append(get_gl_dict(opposing_account, unallocated, 0, mop_account))
+        else:
+            # Full amount unallocated or no party
+            if self.transaction_type == "Receipt":
+                gl_entries.append(get_gl_dict(opposing_account, 0, amount, mop_account))
+            else:
+                gl_entries.append(get_gl_dict(opposing_account, amount, 0, mop_account))
+
+        make_gl_entries(gl_entries, cancel=cancel, adv_adj=True, merge_entries=False)
 
 
 # -----------------------------------------------------------------------

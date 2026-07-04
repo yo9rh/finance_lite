@@ -36,14 +36,17 @@ frappe.ui.form.on('Lite Transaction', {
     _add_custom_buttons: function(frm) {
         frm.clear_custom_buttons();
 
-        if (frm.doc.docstatus === 1 && frm.doc.linked_doc) {
-            let linked_doctype = frm.doc.has_party ? 'Payment Entry' : 'Journal Entry';
-            frm.add_custom_button(__('View {0}', [__(linked_doctype)]), function() {
-                frappe.set_route('Form', linked_doctype, frm.doc.linked_doc);
-            }, __('Linked Document'));
-        }
-
         if (frm.doc.docstatus === 1) {
+            frm.add_custom_button(__('General Ledger'), function() {
+                frappe.route_options = {
+                    voucher_no: frm.doc.name,
+                    from_date: frm.doc.posting_date,
+                    to_date: frm.doc.posting_date,
+                    company: frm.doc.company
+                };
+                frappe.set_route("query-report", "General Ledger");
+            }, __('Accounting'));
+
             frm.add_custom_button(__('Print Receipt'), function() {
                 frappe.utils.print(frm.doctype, frm.docname, 'إيصال مالي');
             });
