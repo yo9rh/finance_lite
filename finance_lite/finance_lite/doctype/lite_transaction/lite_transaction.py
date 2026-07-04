@@ -101,6 +101,12 @@ class LiteTransaction(Document):
         except Exception:
             pass
 
+        # Force exchange rates if not set
+        if not pe.source_exchange_rate:
+            pe.source_exchange_rate = 1.0
+        if not pe.target_exchange_rate:
+            pe.target_exchange_rate = 1.0
+
         pe.insert(ignore_permissions=True)
         pe.submit()
 
