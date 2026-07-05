@@ -47,6 +47,16 @@ frappe.ui.form.on('Lite Transaction', {
                 }
             };
         });
+
+        // Filter for discount account
+        frm.set_query('discount_account', function() {
+            return {
+                filters: {
+                    company: frm.doc.company,
+                    is_group: 0
+                }
+            };
+        });
     },
 
     refresh: function(frm) {
@@ -78,9 +88,13 @@ frappe.ui.form.on('Lite Transaction', {
     },
 
     company: function(frm) {
-        // Clear party and account when company changes
+        // Clear party, account, and discounts when company changes
         frm.set_value('party', '');
         frm.set_value('account', '');
+        frm.set_value('discount_account', '');
+        frm.set_value('discount_amount', 0);
+        frm.set_value('discount_percentage', 0);
+        frm.set_value('amount_before_discount', 0);
         frm.clear_table('allocations');
         frm.refresh_field('allocations');
     },
@@ -88,30 +102,14 @@ frappe.ui.form.on('Lite Transaction', {
     mode_of_payment: function(frm) {
         if (frm.doc.mode_of_payment && frm.doc.company) {
             frappe.call({
-                method: 'frappe.client.get_value',
+                method: 'finance_lite.finance_lite.doctype.lite_transaction.lite_transaction.get_mop_details',
                 args: {
-                    doctype: 'Mode of Payment Account',
-                    filters: {
-                        parent: frm.doc.mode_of_payment,
-                        company: frm.doc.company
-                    },
-                    fieldname: 'default_account'
+                    mode_of_payment: frm.doc.mode_of_payment,
+                    company: frm.doc.company
                 },
                 callback: function(r) {
-                    if (r.message && r.message.default_account) {
-                        frappe.call({
-                            method: 'frappe.client.get_value',
-                            args: {
-                                doctype: 'Account',
-                                filters: { name: r.message.default_account },
-                                fieldname: 'account_currency'
-                            },
-                            callback: function(res) {
-                                if (res.message && res.message.account_currency) {
-                                    frm.set_value('currency', res.message.account_currency);
-                                }
-                            }
-                        });
+                    if (r.message && r.message.currency) {
+                        frm.set_value('currency', r.message.currency);
                     }
                 }
             });

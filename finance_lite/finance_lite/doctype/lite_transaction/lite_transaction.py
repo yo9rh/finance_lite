@@ -354,3 +354,23 @@ def get_party_balance(party_type, party, company):
     if party_type == "Supplier":
         return -bal
     return bal
+
+
+@frappe.whitelist()
+def get_mop_details(mode_of_payment, company):
+    """
+    Bypasses permission checks on Mode of Payment Account to retrieve default account and currency safely.
+    """
+    mop_account = frappe.db.get_value(
+        "Mode of Payment Account",
+        {"parent": mode_of_payment, "company": company},
+        "default_account"
+    )
+    if mop_account:
+        company_currency = frappe.get_cached_value("Company", company, "default_currency")
+        account_currency = frappe.db.get_value("Account", mop_account, "account_currency") or company_currency
+        return {
+            "account": mop_account,
+            "currency": account_currency
+        }
+    return {}
