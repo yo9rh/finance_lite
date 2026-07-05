@@ -1,0 +1,103 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"nKKr6fjgjb\",\"type\":\"card\",\"data\":{\"card_name\":\"المالية المبسطة (Finance Lite)\",\"col\":4}},{\"id\":\"qReportsCard\",\"type\":\"card\",\"data\":{\"card_name\":\"التقارير (Reports)\",\"col\":4}}]",
+ "creation": "2026-07-05 09:30:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "money",
+ "idx": 0,
+ "indicator_color": "",
+ "is_hidden": 0,
+ "label": "Finance Lite",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "المالية المبسطة (Finance Lite)",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "سند مالي مبسط",
+   "link_to": "Lite Transaction",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "التقارير (Reports)",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "تقرير الصندوق اليومي",
+   "link_to": "Daily Cash Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "تقرير إغلاق أمين الصندوق",
+   "link_to": "Cashier Closing Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "دفتر الأستاذ العام (General Ledger)",
+   "link_to": "General Ledger",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-07-05 09:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Finance Lite",
+ "name": "Finance Lite",
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "sequence_id": 0,
+ "shortcuts": [
+  {
+   "color": "blue",
+   "doc_view": "List",
+   "icon": "plus",
+   "label": "سند قبض/صرف جديد",
+   "link_to": "Lite Transaction",
+   "type": "DocType"
+  },
+  {
+   "color": "green",
+   "icon": "file",
+   "label": "تقرير الصندوق اليومي",
+   "link_to": "Daily Cash Report",
+   "type": "Report"
+  },
+  {
+   "color": "orange",
+   "icon": "file",
+   "label": "تقرير إغلاق أمين الصندوق",
+   "link_to": "Cashier Closing Report",
+   "type": "Report"
+  }
+ ]
+}
