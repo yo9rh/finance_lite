@@ -85,6 +85,75 @@ frappe.ui.form.on('Lite Transaction', {
         frm.refresh_field('allocations');
     },
 
+    mode_of_payment: function(frm) {
+        if (frm.doc.mode_of_payment && frm.doc.company) {
+            frappe.call({
+                method: 'frappe.client.get_value',
+                args: {
+                    doctype: 'Mode of Payment Account',
+                    filters: {
+                        parent: frm.doc.mode_of_payment,
+                        company: frm.doc.company
+                    },
+                    fieldname: 'default_account'
+                },
+                callback: function(r) {
+                    if (r.message && r.message.default_account) {
+                        frappe.call({
+                            method: 'frappe.client.get_value',
+                            args: {
+                                doctype: 'Account',
+                                filters: { name: r.message.default_account },
+                                fieldname: 'account_currency'
+                            },
+                            callback: function(res) {
+                                if (res.message && res.message.account_currency) {
+                                    frm.set_value('currency', res.message.account_currency);
+                                }
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    },
+
+    currency: function(frm) {
+        if (frm.doc.company && frm.doc.currency) {
+            frappe.db.get_value('Company', frm.doc.company, 'default_currency', (r) => {
+                let company_currency = r.default_currency;
+                if (frm.doc.currency === company_currency) {
+                    frm.set_value('exchange_rate', 1.0);
+                    frm.set_df_property('exchange_rate', 'read_only', 1);
+                } else {
+                    frm.set_df_property('exchange_rate', 'read_only', 0);
+                    frappe.call({
+                        method: 'erpnext.setup.utils.get_exchange_rate',
+                        args: {
+                            from_currency: frm.doc.currency,
+                            to_currency: company_currency,
+                            transaction_date: frm.doc.posting_date
+                        },
+                        callback: function(res) {
+                            if (res.message) {
+                                frm.set_value('exchange_rate', res.message);
+                            } else {
+                                frm.set_value('exchange_rate', 1.0);
+                            }
+                        }
+                    });
+                }
+            });
+        }
+        frm.clear_table('allocations');
+        frm.refresh_field('allocations');
+        frm.trigger('fetch_party_balance');
+    },
+
+    exchange_rate: function(frm) {
+        frm.trigger('calculate_new_balance');
+    },
+
     has_party: function(frm) {
         let is_party = frm.doc.has_party;
 
@@ -257,7 +326,8 @@ frappe.ui.form.on('Lite Transaction', {
                 party_type: frm.doc.party_type,
                 party: frm.doc.party,
                 transaction_type: frm.doc.transaction_type,
-                company: frm.doc.company
+                company: frm.doc.company,
+                currency: frm.doc.currency
             },
             freeze: true,
             freeze_message: __('Fetching invoices...'),

@@ -88,10 +88,29 @@ class LiteTransaction(Document):
             else:
                 opposing_account = ", ".join(list(set([row.account for row in self.accounts])))
 
-        amount = flt(self.paid_amount)
+        company_currency = frappe.get_cached_value("Company", self.company, "default_currency")
+        tx_currency = self.currency or company_currency
+        rate = flt(self.exchange_rate) or 1.0
+
+        base_amount = flt(self.paid_amount) * rate
         cost_center = frappe.get_cached_value("Company", self.company, "cost_center")
 
         def get_gl_dict(account, debit, credit, against_acc, against_v_type=None, against_v=None, remarks=None, party_type=None, party=None):
+            acc_currency = frappe.db.get_value("Account", account, "account_currency") or company_currency
+            
+            # Calculate debit/credit in account currency
+            if acc_currency == company_currency:
+                debit_in_acc = debit
+                credit_in_acc = credit
+            elif acc_currency == tx_currency:
+                debit_in_acc = debit / rate if debit else 0
+                credit_in_acc = credit / rate if credit else 0
+            else:
+                from erpnext.setup.utils import get_exchange_rate
+                acc_rate = flt(get_exchange_rate(tx_currency, acc_currency, self.posting_date)) or 1.0
+                debit_in_acc = debit / acc_rate if debit else 0
+                credit_in_acc = credit / acc_rate if credit else 0
+
             return frappe._dict({
                 "company": self.company,
                 "posting_date": self.posting_date,
@@ -101,8 +120,9 @@ class LiteTransaction(Document):
                 "against": against_acc,
                 "debit": debit,
                 "credit": credit,
-                "debit_in_account_currency": debit,
-                "credit_in_account_currency": credit,
+                "debit_in_account_currency": debit_in_acc,
+                "credit_in_account_currency": credit_in_acc,
+                "account_currency": acc_currency,
                 "against_voucher_type": against_v_type,
                 "against_voucher": against_v,
                 "party_type": party_type,
@@ -114,89 +134,91 @@ class LiteTransaction(Document):
         # 3. Add MOP Account Entry
         # MOP account is debited if Receipt, credited if Payment. The amount is paid_amount.
         if self.transaction_type == "Receipt":
-            gl_entries.append(get_gl_dict(mop_account, amount, 0, opposing_account))
+            gl_entries.append(get_gl_dict(mop_account, base_amount, 0, opposing_account))
         else:
-            gl_entries.append(get_gl_dict(mop_account, 0, amount, opposing_account))
+            gl_entries.append(get_gl_dict(mop_account, 0, base_amount, opposing_account))
 
         # 3.5 Handle Discount Entry
         if self.enable_discount and flt(self.discount_amount) > 0:
             if not self.discount_account:
                 frappe.throw(_("Discount Account is mandatory when discount is enabled."))
+            discount_base = flt(self.discount_amount) * rate
             if self.transaction_type == "Receipt":
                 # Discount Allowed is an expense (Debit)
-                gl_entries.append(get_gl_dict(self.discount_account, flt(self.discount_amount), 0, opposing_account))
+                gl_entries.append(get_gl_dict(self.discount_account, discount_base, 0, opposing_account))
             else:
                 # Discount Received is an income (Credit)
-                gl_entries.append(get_gl_dict(self.discount_account, 0, flt(self.discount_amount), opposing_account))
+                gl_entries.append(get_gl_dict(self.discount_account, 0, discount_base, opposing_account))
 
         # 4. Add Opposing Account Entry (Split by allocations if necessary)
         # The opposing entry total must be amount_before_discount if discount is enabled, else paid_amount
-        total_party_amount = flt(self.amount_before_discount) if self.enable_discount else amount
+        total_party_amount_base = (flt(self.amount_before_discount) if self.enable_discount else flt(self.paid_amount)) * rate
 
         if self.has_party:
             if self.allocations:
-                allocated_total = 0
+                allocated_total_tx = 0
                 for ref in self.allocations:
-                    allocated_amt = flt(ref.allocated_amount)
-                    if allocated_amt > 0:
-                        allocated_total += allocated_amt
+                    allocated_amt_tx = flt(ref.allocated_amount)
+                    if allocated_amt_tx > 0:
+                        allocated_total_tx += allocated_amt_tx
+                        allocated_amt_base = allocated_amt_tx * rate
                         # Use specific account from allocation if available, else fallback to default opposing
                         row_account = ref.account or opposing_account
                         
                         if self.transaction_type == "Receipt":
                             # Customer paying us -> credit customer
                             gl_entries.append(
-                                get_gl_dict(row_account, 0, allocated_amt, mop_account, 
+                                get_gl_dict(row_account, 0, allocated_amt_base, mop_account, 
                                             ref.reference_doctype, ref.reference_name, 
                                             party_type=self.party_type, party=self.party)
                             )
                         else:
                             # We paying supplier -> debit supplier
                             gl_entries.append(
-                                get_gl_dict(row_account, allocated_amt, 0, mop_account, 
+                                get_gl_dict(row_account, allocated_amt_base, 0, mop_account, 
                                             ref.reference_doctype, ref.reference_name, 
                                             party_type=self.party_type, party=self.party)
                             )
 
                 # Unallocated remainder
-                unallocated = total_party_amount - allocated_total
-                if unallocated > 0:
+                unallocated_base = total_party_amount_base - (allocated_total_tx * rate)
+                if unallocated_base > 0:
                     if self.transaction_type == "Receipt":
-                        gl_entries.append(get_gl_dict(opposing_account, 0, unallocated, mop_account,
+                        gl_entries.append(get_gl_dict(opposing_account, 0, unallocated_base, mop_account,
                                                      party_type=self.party_type, party=self.party))
                     else:
-                        gl_entries.append(get_gl_dict(opposing_account, unallocated, 0, mop_account,
+                        gl_entries.append(get_gl_dict(opposing_account, unallocated_base, 0, mop_account,
                                                      party_type=self.party_type, party=self.party))
             else:
                 # Full amount unallocated
                 if self.transaction_type == "Receipt":
-                    gl_entries.append(get_gl_dict(opposing_account, 0, total_party_amount, mop_account,
+                    gl_entries.append(get_gl_dict(opposing_account, 0, total_party_amount_base, mop_account,
                                                  party_type=self.party_type, party=self.party))
                 else:
-                    gl_entries.append(get_gl_dict(opposing_account, total_party_amount, 0, mop_account,
+                    gl_entries.append(get_gl_dict(opposing_account, total_party_amount_base, 0, mop_account,
                                                  party_type=self.party_type, party=self.party))
         else:
             # No party (Direct Accounts)
             if self.split_entries:
                 for row in self.accounts:
-                    row_amount = flt(row.amount)
-                    if row_amount > 0:
+                    row_amount_base = flt(row.amount) * rate
+                    if row_amount_base > 0:
                         if self.transaction_type == "Receipt":
                             # Receipt: opposing accounts are credited (Income/Liability)
                             gl_entries.append(
-                                get_gl_dict(row.account, 0, row_amount, mop_account, remarks=row.remarks)
+                                get_gl_dict(row.account, 0, row_amount_base, mop_account, remarks=row.remarks)
                             )
                         else:
                             # Payment: opposing accounts are debited (Expense/Asset)
                             gl_entries.append(
-                                get_gl_dict(row.account, row_amount, 0, mop_account, remarks=row.remarks)
+                                get_gl_dict(row.account, row_amount_base, 0, mop_account, remarks=row.remarks)
                             )
             else:
                 # Single opposing account
                 if self.transaction_type == "Receipt":
-                    gl_entries.append(get_gl_dict(opposing_account, 0, amount, mop_account))
+                    gl_entries.append(get_gl_dict(opposing_account, 0, base_amount, mop_account))
                 else:
-                    gl_entries.append(get_gl_dict(opposing_account, amount, 0, mop_account))
+                    gl_entries.append(get_gl_dict(opposing_account, base_amount, 0, mop_account))
 
         make_gl_entries(gl_entries, cancel=cancel, adv_adj=True, merge_entries=False)
 
@@ -231,7 +253,7 @@ class LiteTransaction(Document):
 # Whitelisted API — جلب الفواتير غير المسددة
 # -----------------------------------------------------------------------
 @frappe.whitelist()
-def get_outstanding_invoices(party_type, party, transaction_type, company=None):
+def get_outstanding_invoices(party_type, party, transaction_type, company=None, currency=None):
     """
     Fetch outstanding documents for a given party by querying GL Entry directly.
     This captures ALL voucher types: Sales Invoice, Journal Entry, Purchase Invoice, etc.
@@ -246,10 +268,10 @@ def get_outstanding_invoices(party_type, party, transaction_type, company=None):
 
     # We skip ERPNext's built-in get_outstanding_reference_documents because it 
     # doesn't reliably return the exact GL account for Journal Entries in all cases.
-    return _get_outstanding_via_gl_entry(party_type, party, company)
+    return _get_outstanding_via_gl_entry(party_type, party, company, currency)
 
 
-def _get_outstanding_via_gl_entry(party_type, party, company):
+def _get_outstanding_via_gl_entry(party_type, party, company, currency=None):
     """
     Direct GL Entry query to find all outstanding amounts for a party.
     Also fetches the exact 'account' from the GL Entry so reconciliation works perfectly.
@@ -257,9 +279,11 @@ def _get_outstanding_via_gl_entry(party_type, party, company):
     if party_type == "Customer":
         # For customers: debit > credit means they still owe us money
         outstanding_expr = "SUM(gle.debit - gle.credit)"
+        outstanding_in_acc_expr = "SUM(gle.debit_in_account_currency - gle.credit_in_account_currency)"
     else:
         # For suppliers/employees: credit > debit means we owe them money
         outstanding_expr = "SUM(gle.credit - gle.debit)"
+        outstanding_in_acc_expr = "SUM(gle.credit_in_account_currency - gle.debit_in_account_currency)"
 
     results = frappe.db.sql(
         f"""
@@ -267,18 +291,22 @@ def _get_outstanding_via_gl_entry(party_type, party, company):
             gle.voucher_type,
             gle.voucher_no,
             gle.account,
-            {outstanding_expr} AS outstanding_amount,
+            acc.account_currency,
+            {outstanding_in_acc_expr} AS outstanding_amount,
             {outstanding_expr} AS invoice_amount
         FROM `tabGL Entry` gle
+        JOIN `tabAccount` acc ON acc.name = gle.account
         WHERE
             gle.party_type = %(party_type)s
             AND gle.party = %(party)s
             AND gle.company = %(company)s
             AND gle.is_cancelled = 0
+            {f"AND acc.account_currency = '{currency}'" if currency else ""}
         GROUP BY
             gle.voucher_type,
             gle.voucher_no,
-            gle.account
+            gle.account,
+            acc.account_currency
         HAVING
             outstanding_amount > 0.005
         ORDER BY
