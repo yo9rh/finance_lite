@@ -52,6 +52,15 @@
   {
    "hidden": 0,
    "is_query_report": 1,
+   "label": "تقرير إغلاق أمين الصندوق",
+   "link_to": "Cashier Closing Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
    "label": "دفتر الأستاذ العام (General Ledger)",
    "link_to": "General Ledger",
    "link_type": "Report",
@@ -81,6 +90,13 @@
    "icon": "file",
    "label": "تقرير الصندوق اليومي",
    "link_to": "Daily Cash Report",
+   "type": "Report"
+  },
+  {
+   "color": "orange",
+   "icon": "file",
+   "label": "تقرير إغلاق أمين الصندوق",
+   "link_to": "Cashier Closing Report",
    "type": "Report"
   }
  ]
