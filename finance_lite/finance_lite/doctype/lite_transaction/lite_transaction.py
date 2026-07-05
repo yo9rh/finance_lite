@@ -27,9 +27,22 @@ class LiteTransaction(Document):
                         frappe.format_value(total_split_amount, {"fieldtype": "Currency"}),
                         frappe.format_value(flt(self.paid_amount), {"fieldtype": "Currency"})
                     ))
+                for row in self.accounts:
+                    if row.account:
+                        acc_company = frappe.db.get_value("Account", row.account, "company")
+                        if acc_company != self.company:
+                            frappe.throw(_("Account {0} in split accounts does not belong to Company {1}").format(row.account, self.company))
             else:
                 if not self.account:
                     frappe.throw(_("Expense / Income Account is mandatory when there is no party."))
+                acc_company = frappe.db.get_value("Account", self.account, "company")
+                if acc_company != self.company:
+                    frappe.throw(_("Expense / Income Account {0} does not belong to Company {1}").format(self.account, self.company))
+
+        if self.enable_discount and self.discount_account:
+            acc_company = frappe.db.get_value("Account", self.discount_account, "company")
+            if acc_company != self.company:
+                frappe.throw(_("Discount Account {0} does not belong to Company {1}").format(self.discount_account, self.company))
 
     def _validate_allocated_amounts(self):
         """Ensure total allocated amounts do not exceed the paid amount."""
