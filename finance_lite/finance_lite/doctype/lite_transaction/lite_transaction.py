@@ -244,7 +244,7 @@ class LiteTransaction(Document):
         if self.party_type == "Supplier":
             bal = -bal
 
-        if self.docstatus == 0:
+        if self.docstatus <= 1:
             self.previous_balance = bal
             total_paid = flt(self.amount_before_discount) if self.enable_discount else flt(self.paid_amount)
 
