@@ -22,11 +22,13 @@
   "get_invoices",
   "allocations",
   "sec_account",
+  "split_entries",
   "account",
+  "accounts",
   "sec_info",
   "remarks",
   "col_break_info",
-  "linked_doc",
+  "custom_paper_sequence",
   "amended_from"
  ],
  "fields": [
@@ -187,12 +189,26 @@
    "depends_on": "eval:doc.has_party == 0"
   },
   {
+   "fieldname": "split_entries",
+   "fieldtype": "Check",
+   "label": "Split Accounts",
+   "default": 0,
+   "depends_on": "eval:doc.has_party == 0"
+  },
+  {
    "fieldname": "account",
    "fieldtype": "Link",
    "label": "Expense / Income Account",
    "options": "Account",
-   "depends_on": "eval:doc.has_party == 0",
-   "mandatory_depends_on": "eval:doc.has_party == 0"
+   "depends_on": "eval:doc.has_party == 0 && doc.split_entries == 0",
+   "mandatory_depends_on": "eval:doc.has_party == 0 && doc.split_entries == 0"
+  },
+  {
+   "fieldname": "accounts",
+   "fieldtype": "Table",
+   "label": "Accounts Split",
+   "options": "Lite Transaction Account",
+   "depends_on": "eval:doc.has_party == 0 && doc.split_entries == 1"
   },
   {
    "fieldname": "sec_info",

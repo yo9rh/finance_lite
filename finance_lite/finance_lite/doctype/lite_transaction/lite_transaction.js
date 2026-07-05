@@ -26,6 +26,21 @@ frappe.ui.form.on('Lite Transaction', {
                 }
             };
         });
+
+        // Filter for split accounts table
+        frm.set_query('account', 'accounts', function() {
+            return {
+                filters: {
+                    company: frm.doc.company,
+                    account_type: ['in', [
+                        'Income Account', 'Expense Account',
+                        'Direct Income', 'Direct Expense',
+                        'Indirect Income', 'Indirect Expense'
+                    ]],
+                    is_group: 0
+                }
+            };
+        });
     },
 
     refresh: function(frm) {
@@ -66,18 +81,50 @@ frappe.ui.form.on('Lite Transaction', {
 
         frm.toggle_display(['party_type', 'party', 'col_break_party',
             'sec_alloc', 'get_invoices', 'allocations'], is_party);
-        frm.toggle_display(['sec_account', 'account'], !is_party);
+        frm.toggle_display(['sec_account', 'split_entries'], !is_party);
 
         frm.toggle_reqd(['party_type', 'party'], is_party);
-        frm.toggle_reqd(['account'], !is_party);
 
         if (!is_party) {
             frm.set_value('party_type', '');
             frm.set_value('party', '');
             frm.clear_table('allocations');
             frm.refresh_field('allocations');
+            frm.trigger('split_entries');
         } else {
             frm.set_value('account', '');
+            frm.set_value('split_entries', 0);
+            frm.clear_table('accounts');
+            frm.refresh_field('accounts');
+            frm.toggle_display(['account', 'accounts'], false);
+            frm.toggle_reqd(['account'], false);
+            frm.set_df_property('paid_amount', 'read_only', 0);
+        }
+    },
+
+    split_entries: function(frm) {
+        let split = frm.doc.split_entries && !frm.doc.has_party;
+        frm.toggle_display(['account'], !frm.doc.has_party && !split);
+        frm.toggle_reqd(['account'], !frm.doc.has_party && !split);
+        frm.toggle_display(['accounts'], !frm.doc.has_party && split);
+        frm.set_df_property('paid_amount', 'read_only', split ? 1 : 0);
+
+        if (!split) {
+            frm.clear_table('accounts');
+            frm.refresh_field('accounts');
+        } else {
+            frm.set_value('account', '');
+            frm.trigger('calculate_paid_amount_from_split');
+        }
+    },
+
+    calculate_paid_amount_from_split: function(frm) {
+        if (frm.doc.split_entries && !frm.doc.has_party) {
+            let total = 0;
+            (frm.doc.accounts || []).forEach(row => {
+                total += flt(row.amount);
+            });
+            frm.set_value('paid_amount', total);
         }
     },
 
@@ -236,5 +283,14 @@ frappe.ui.form.on('Lite Transaction Reference', {
                 ])
             });
         }
+    }
+});
+
+frappe.ui.form.on('Lite Transaction Account', {
+    amount: function(frm, cdt, cdn) {
+        frm.trigger('calculate_paid_amount_from_split');
+    },
+    accounts_remove: function(frm) {
+        frm.trigger('calculate_paid_amount_from_split');
     }
 });

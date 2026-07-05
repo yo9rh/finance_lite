@@ -16,6 +16,19 @@ class LiteTransaction(Document):
         if self.has_party:
             if not self.party_type or not self.party:
                 frappe.throw(_("Party Type and Party are mandatory when 'Has Party' is checked."))
+        else:
+            if self.split_entries:
+                if not self.accounts:
+                    frappe.throw(_("Please add at least one account in the Split Accounts table."))
+                total_split_amount = sum(flt(row.amount) for row in self.accounts)
+                if abs(total_split_amount - flt(self.paid_amount)) > 0.005:
+                    frappe.throw(_("Total split amount ({0}) must equal the Paid Amount ({1}).").format(
+                        frappe.format_value(total_split_amount, {"fieldtype": "Currency"}),
+                        frappe.format_value(flt(self.paid_amount), {"fieldtype": "Currency"})
+                    ))
+            else:
+                if not self.account:
+                    frappe.throw(_("Expense / Income Account is mandatory when there is no party."))
 
     def _validate_allocated_amounts(self):
         """Ensure total allocated amounts do not exceed the paid amount."""
@@ -67,14 +80,17 @@ class LiteTransaction(Document):
             if not opposing_account:
                 frappe.throw(_("Please set a default account for {0} {1}").format(self.party_type, self.party))
         else:
-            opposing_account = self.account
-            if not opposing_account:
-                frappe.throw(_("Expense / Income Account is mandatory when there is no party."))
+            if not self.split_entries:
+                opposing_account = self.account
+                if not opposing_account:
+                    frappe.throw(_("Expense / Income Account is mandatory when there is no party."))
+            else:
+                opposing_account = ", ".join(list(set([row.account for row in self.accounts])))
 
         amount = flt(self.paid_amount)
         cost_center = frappe.get_cached_value("Company", self.company, "cost_center")
 
-        def get_gl_dict(account, debit, credit, against_acc, against_v_type=None, against_v=None):
+        def get_gl_dict(account, debit, credit, against_acc, against_v_type=None, against_v=None, remarks=None):
             return frappe._dict({
                 "company": self.company,
                 "posting_date": self.posting_date,
@@ -90,7 +106,7 @@ class LiteTransaction(Document):
                 "against_voucher": against_v,
                 "party_type": self.party_type if account == opposing_account and self.has_party else None,
                 "party": self.party if account == opposing_account and self.has_party else None,
-                "remarks": self.remarks or _("Finance Lite Transaction"),
+                "remarks": remarks or self.remarks or _("Finance Lite Transaction"),
                 "cost_center": cost_center
             })
 
@@ -116,39 +132,62 @@ class LiteTransaction(Document):
         # The opposing entry total must be amount_before_discount if discount is enabled, else paid_amount
         total_party_amount = flt(self.amount_before_discount) if self.enable_discount else amount
 
-        if self.has_party and self.allocations:
-            allocated_total = 0
-            for ref in self.allocations:
-                allocated_amt = flt(ref.allocated_amount)
-                if allocated_amt > 0:
-                    allocated_total += allocated_amt
-                    # Use specific account from allocation if available, else fallback to default opposing
-                    row_account = ref.account or opposing_account
-                    
-                    if self.transaction_type == "Receipt":
-                        # Customer paying us -> credit customer
-                        gl_entries.append(
-                            get_gl_dict(row_account, 0, allocated_amt, mop_account, ref.reference_doctype, ref.reference_name)
-                        )
-                    else:
-                        # We paying supplier -> debit supplier
-                        gl_entries.append(
-                            get_gl_dict(row_account, allocated_amt, 0, mop_account, ref.reference_doctype, ref.reference_name)
-                        )
+        if self.has_party:
+            if self.allocations:
+                allocated_total = 0
+                for ref in self.allocations:
+                    allocated_amt = flt(ref.allocated_amount)
+                    if allocated_amt > 0:
+                        allocated_total += allocated_amt
+                        # Use specific account from allocation if available, else fallback to default opposing
+                        row_account = ref.account or opposing_account
+                        
+                        if self.transaction_type == "Receipt":
+                            # Customer paying us -> credit customer
+                            gl_entries.append(
+                                get_gl_dict(row_account, 0, allocated_amt, mop_account, ref.reference_doctype, ref.reference_name)
+                            )
+                        else:
+                            # We paying supplier -> debit supplier
+                            gl_entries.append(
+                                get_gl_dict(row_account, allocated_amt, 0, mop_account, ref.reference_doctype, ref.reference_name)
+                            )
 
-            # Unallocated remainder
-            unallocated = total_party_amount - allocated_total
-            if unallocated > 0:
-                if self.transaction_type == "Receipt":
-                    gl_entries.append(get_gl_dict(opposing_account, 0, unallocated, mop_account))
-                else:
-                    gl_entries.append(get_gl_dict(opposing_account, unallocated, 0, mop_account))
-        else:
-            # Full amount unallocated or no party
-            if self.transaction_type == "Receipt":
-                gl_entries.append(get_gl_dict(opposing_account, 0, total_party_amount, mop_account))
+                # Unallocated remainder
+                unallocated = total_party_amount - allocated_total
+                if unallocated > 0:
+                    if self.transaction_type == "Receipt":
+                        gl_entries.append(get_gl_dict(opposing_account, 0, unallocated, mop_account))
+                    else:
+                        gl_entries.append(get_gl_dict(opposing_account, unallocated, 0, mop_account))
             else:
-                gl_entries.append(get_gl_dict(opposing_account, total_party_amount, 0, mop_account))
+                # Full amount unallocated
+                if self.transaction_type == "Receipt":
+                    gl_entries.append(get_gl_dict(opposing_account, 0, total_party_amount, mop_account))
+                else:
+                    gl_entries.append(get_gl_dict(opposing_account, total_party_amount, 0, mop_account))
+        else:
+            # No party (Direct Accounts)
+            if self.split_entries:
+                for row in self.accounts:
+                    row_amount = flt(row.amount)
+                    if row_amount > 0:
+                        if self.transaction_type == "Receipt":
+                            # Receipt: opposing accounts are credited (Income/Liability)
+                            gl_entries.append(
+                                get_gl_dict(row.account, 0, row_amount, mop_account, remarks=row.remarks)
+                            )
+                        else:
+                            # Payment: opposing accounts are debited (Expense/Asset)
+                            gl_entries.append(
+                                get_gl_dict(row.account, row_amount, 0, mop_account, remarks=row.remarks)
+                            )
+            else:
+                # Single opposing account
+                if self.transaction_type == "Receipt":
+                    gl_entries.append(get_gl_dict(opposing_account, 0, amount, mop_account))
+                else:
+                    gl_entries.append(get_gl_dict(opposing_account, amount, 0, mop_account))
 
         make_gl_entries(gl_entries, cancel=cancel, adv_adj=True, merge_entries=False)
 
