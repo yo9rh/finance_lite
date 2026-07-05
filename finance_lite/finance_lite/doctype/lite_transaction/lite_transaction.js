@@ -2,6 +2,12 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on('Lite Transaction', {
+    onload: function(frm) {
+        if (frm.is_new() && !frm.doc.company) {
+            frm.set_value('company', frappe.defaults.get_default('company'));
+        }
+    },
+
     setup: function(frm) {
         // Filter allowed party types
         frm.set_query('party_type', function() {
@@ -46,6 +52,9 @@ frappe.ui.form.on('Lite Transaction', {
     refresh: function(frm) {
         frm.trigger('has_party');
         frm.trigger('_add_custom_buttons');
+        if (frm.doc.has_party && frm.doc.party) {
+            frm.trigger('fetch_party_balance');
+        }
     },
 
     _add_custom_buttons: function(frm) {
@@ -128,21 +137,73 @@ frappe.ui.form.on('Lite Transaction', {
         }
     },
 
+    fetch_party_balance: function(frm) {
+        if (frm.doc.has_party && frm.doc.party_type && frm.doc.party && frm.doc.company) {
+            frappe.call({
+                method: 'finance_lite.finance_lite.doctype.lite_transaction.lite_transaction.get_party_balance',
+                args: {
+                    party_type: frm.doc.party_type,
+                    party: frm.doc.party,
+                    company: frm.doc.company
+                },
+                callback: function(r) {
+                    if (r.message !== undefined) {
+                        frm.set_value('previous_balance', r.message);
+                        frm.trigger('calculate_new_balance');
+                    }
+                }
+            });
+        } else {
+            frm.set_value('previous_balance', 0);
+            frm.set_value('new_balance', 0);
+        }
+    },
+
+    calculate_new_balance: function(frm) {
+        if (frm.doc.has_party) {
+            let prev = flt(frm.doc.previous_balance);
+            let amount = frm.doc.enable_discount ? flt(frm.doc.amount_before_discount) : flt(frm.doc.paid_amount);
+            let new_bal = prev;
+
+            if (frm.doc.party_type === 'Customer') {
+                if (frm.doc.transaction_type === 'Receipt') {
+                    new_bal = prev - amount;
+                } else {
+                    new_bal = prev + amount;
+                }
+            } else if (frm.doc.party_type === 'Supplier') {
+                if (frm.doc.transaction_type === 'Payment') {
+                    new_bal = prev - amount;
+                } else {
+                    new_bal = prev + amount;
+                }
+            }
+            frm.set_value('new_balance', new_bal);
+        }
+    },
+
     transaction_type: function(frm) {
         frm.set_value('party', '');
         frm.clear_table('allocations');
         frm.refresh_field('allocations');
+        frm.trigger('fetch_party_balance');
     },
 
     party_type: function(frm) {
         frm.set_value('party', '');
         frm.clear_table('allocations');
         frm.refresh_field('allocations');
+        frm.trigger('fetch_party_balance');
     },
 
     party: function(frm) {
         frm.clear_table('allocations');
         frm.refresh_field('allocations');
+        frm.trigger('fetch_party_balance');
+    },
+
+    paid_amount: function(frm) {
+        frm.trigger('calculate_new_balance');
     },
 
     enable_discount: function(frm) {
@@ -155,6 +216,7 @@ frappe.ui.form.on('Lite Transaction', {
                 frm.set_value('amount_before_discount', frm.doc.paid_amount);
             }
         }
+        frm.trigger('calculate_new_balance');
     },
 
     amount_before_discount: function(frm) {
@@ -163,6 +225,7 @@ frappe.ui.form.on('Lite Transaction', {
             frappe.model.set_value(frm.doctype, frm.docname, 'discount_amount', discount_amt);
             frappe.model.set_value(frm.doctype, frm.docname, 'paid_amount', (frm.doc.amount_before_discount || 0) - discount_amt);
         }
+        frm.trigger('calculate_new_balance');
     },
 
     discount_percentage: function(frm) {
@@ -171,6 +234,7 @@ frappe.ui.form.on('Lite Transaction', {
             frappe.model.set_value(frm.doctype, frm.docname, 'discount_amount', discount_amt);
             frappe.model.set_value(frm.doctype, frm.docname, 'paid_amount', (frm.doc.amount_before_discount || 0) - discount_amt);
         }
+        frm.trigger('calculate_new_balance');
     },
 
     discount_amount: function(frm) {

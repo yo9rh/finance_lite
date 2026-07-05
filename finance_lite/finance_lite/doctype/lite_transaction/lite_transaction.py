@@ -16,6 +16,7 @@ class LiteTransaction(Document):
         if self.has_party:
             if not self.party_type or not self.party:
                 frappe.throw(_("Party Type and Party are mandatory when 'Has Party' is checked."))
+            self.set_party_balances()
         else:
             if self.split_entries:
                 if not self.accounts:
@@ -90,7 +91,7 @@ class LiteTransaction(Document):
         amount = flt(self.paid_amount)
         cost_center = frappe.get_cached_value("Company", self.company, "cost_center")
 
-        def get_gl_dict(account, debit, credit, against_acc, against_v_type=None, against_v=None, remarks=None):
+        def get_gl_dict(account, debit, credit, against_acc, against_v_type=None, against_v=None, remarks=None, party_type=None, party=None):
             return frappe._dict({
                 "company": self.company,
                 "posting_date": self.posting_date,
@@ -104,8 +105,8 @@ class LiteTransaction(Document):
                 "credit_in_account_currency": credit,
                 "against_voucher_type": against_v_type,
                 "against_voucher": against_v,
-                "party_type": self.party_type if account == opposing_account and self.has_party else None,
-                "party": self.party if account == opposing_account and self.has_party else None,
+                "party_type": party_type,
+                "party": party,
                 "remarks": remarks or self.remarks or _("Finance Lite Transaction"),
                 "cost_center": cost_center
             })
@@ -145,27 +146,35 @@ class LiteTransaction(Document):
                         if self.transaction_type == "Receipt":
                             # Customer paying us -> credit customer
                             gl_entries.append(
-                                get_gl_dict(row_account, 0, allocated_amt, mop_account, ref.reference_doctype, ref.reference_name)
+                                get_gl_dict(row_account, 0, allocated_amt, mop_account, 
+                                            ref.reference_doctype, ref.reference_name, 
+                                            party_type=self.party_type, party=self.party)
                             )
                         else:
                             # We paying supplier -> debit supplier
                             gl_entries.append(
-                                get_gl_dict(row_account, allocated_amt, 0, mop_account, ref.reference_doctype, ref.reference_name)
+                                get_gl_dict(row_account, allocated_amt, 0, mop_account, 
+                                            ref.reference_doctype, ref.reference_name, 
+                                            party_type=self.party_type, party=self.party)
                             )
 
                 # Unallocated remainder
                 unallocated = total_party_amount - allocated_total
                 if unallocated > 0:
                     if self.transaction_type == "Receipt":
-                        gl_entries.append(get_gl_dict(opposing_account, 0, unallocated, mop_account))
+                        gl_entries.append(get_gl_dict(opposing_account, 0, unallocated, mop_account,
+                                                     party_type=self.party_type, party=self.party))
                     else:
-                        gl_entries.append(get_gl_dict(opposing_account, unallocated, 0, mop_account))
+                        gl_entries.append(get_gl_dict(opposing_account, unallocated, 0, mop_account,
+                                                     party_type=self.party_type, party=self.party))
             else:
                 # Full amount unallocated
                 if self.transaction_type == "Receipt":
-                    gl_entries.append(get_gl_dict(opposing_account, 0, total_party_amount, mop_account))
+                    gl_entries.append(get_gl_dict(opposing_account, 0, total_party_amount, mop_account,
+                                                 party_type=self.party_type, party=self.party))
                 else:
-                    gl_entries.append(get_gl_dict(opposing_account, total_party_amount, 0, mop_account))
+                    gl_entries.append(get_gl_dict(opposing_account, total_party_amount, 0, mop_account,
+                                                 party_type=self.party_type, party=self.party))
         else:
             # No party (Direct Accounts)
             if self.split_entries:
@@ -190,6 +199,32 @@ class LiteTransaction(Document):
                     gl_entries.append(get_gl_dict(opposing_account, amount, 0, mop_account))
 
         make_gl_entries(gl_entries, cancel=cancel, adv_adj=True, merge_entries=False)
+
+    def set_party_balances(self):
+        if not self.has_party or not self.party_type or not self.party:
+            return
+
+        from erpnext.accounts.utils import get_balance_on
+        bal = flt(get_balance_on(party_type=self.party_type, party=self.party, company=self.company))
+        if self.party_type == "Supplier":
+            bal = -bal
+
+        if self.docstatus == 0:
+            self.previous_balance = bal
+            total_paid = flt(self.amount_before_discount) if self.enable_discount else flt(self.paid_amount)
+
+            if self.party_type == "Customer":
+                if self.transaction_type == "Receipt":
+                    self.new_balance = self.previous_balance - total_paid
+                else:
+                    self.new_balance = self.previous_balance + total_paid
+            elif self.party_type == "Supplier":
+                if self.transaction_type == "Payment":
+                    self.new_balance = self.previous_balance - total_paid
+                else:
+                    self.new_balance = self.previous_balance + total_paid
+            else:
+                self.new_balance = self.previous_balance
 
 
 # -----------------------------------------------------------------------
@@ -277,3 +312,17 @@ def _get_voucher_total(voucher_type, voucher_no):
     except Exception:
         pass
     return 0
+
+
+@frappe.whitelist()
+def get_party_balance(party_type, party, company):
+    """
+    Fetch the current outstanding balance for a customer or supplier.
+    Customer outstanding: balance > 0 (they owe us).
+    Supplier outstanding: balance < 0 (we owe them), returned as positive.
+    """
+    from erpnext.accounts.utils import get_balance_on
+    bal = flt(get_balance_on(party_type=party_type, party=party, company=company))
+    if party_type == "Supplier":
+        return -bal
+    return bal

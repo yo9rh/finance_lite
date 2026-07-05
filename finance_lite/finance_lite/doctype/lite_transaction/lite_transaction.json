@@ -18,6 +18,8 @@
   "party_type",
   "col_break_party",
   "party",
+  "previous_balance",
+  "new_balance",
   "sec_alloc",
   "get_invoices",
   "allocations",
@@ -48,7 +50,6 @@
    "label": "Company",
    "options": "Company",
    "reqd": 1,
-   "default": "frappe.defaults.get_user_default('Company')",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "search_index": 1
@@ -161,6 +162,22 @@
    "depends_on": "eval:doc.has_party == 1",
    "mandatory_depends_on": "eval:doc.has_party == 1",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "previous_balance",
+   "fieldtype": "Currency",
+   "label": "الرصيد السابق (Previous Balance)",
+   "read_only": 1,
+   "depends_on": "eval:doc.has_party == 1",
+   "options": "currency"
+  },
+  {
+   "fieldname": "new_balance",
+   "fieldtype": "Currency",
+   "label": "الرصيد بعد السداد (Balance After)",
+   "read_only": 1,
+   "depends_on": "eval:doc.has_party == 1",
+   "options": "currency"
   },
   {
    "fieldname": "sec_alloc",
